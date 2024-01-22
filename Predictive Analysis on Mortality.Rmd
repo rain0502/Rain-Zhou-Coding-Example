@@ -1,0 +1,106 @@
+---
+title: 'Project 1: Wrangling, Exploration, Visualization'
+author: "SDS322E"
+date: ''
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F,
+tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
+```
+
+## Data Wrangling, Exploration, Visualization
+
+### Xiaoyu Zhou, xz7363
+
+#### Introduction 
+
+This project is to further explore various data for different countries with dplyr functions and visualization. It contains two datasets named 'country' which includes variables of basic information for countries, such as 'country', 'region', 'population', 'area', 'population density', 'coastline', 'net migration', 'infant mortality', 'GDP', 'literacy', 'birthrate', 'deathrate', etc., and 'internetusers' which includes variables 'country or area', 'internet users', 'population', and 'rank'. These datasets are obtained from the website: https://www.kaggle.com/datasets. These two datasets interest me because potential relationships or trends may be discovered based on different countries/regions.
+
+```{R}
+library(tidyverse)
+country <- read_csv("countries of the world.csv")
+internetusers <- read_csv("internetusers.csv")
+```
+
+#### Tidying: Reshaping
+
+If your datasets are tidy already, demonstrate that you can reshape data with pivot wider/longer here (e.g., untidy and then retidy). Alternatively, it may be easier to wait until the wrangling section so you can reshape your summary statistics. Note here if you are going to do this.
+
+```{R}
+head(country)
+head(internetusers)
+country %>% pivot_wider(names_from = "Region",values_from = "Population") %>% pivot_longer(19:29,names_to = "Region", values_to = "Population",values_drop_na=T)
+```
+
+Since my datasets are already tidy, I first untidy them by using pivot_wider and then retidy it with pivot_longer while dropping all the NAs originated from the untidy process.  
+    
+#### Joining/Merging
+
+```{R}
+nrow(country)
+country %>% summarize(n_distinct(Country))
+nrow(internetusers)
+internetusers %>% summarize(n_distinct(`Country or Area`))
+anti_join(country,internetusers,by=c("Country"="Country or Area"))
+anti_join(internetusers,country,by=c("Country or Area"="Country"))
+data <- inner_join(country,internetusers,by=c("Country"="Country or Area"))
+nrow(data)
+```
+
+In this section, I used inner join to combine my two dataset because this would only return countries appeared in both datasets without introducing NAs. Originally, there are 227 rows in the 'country' dataset with 227 distinct IDs and 215 rows in the 'internetusers' dataset with 215 distinct IDs. There are 36 IDs appeared in 'country' but not 'internetusers' and 24 IDs appeared in 'internetusers' but not 'country', and these IDs are dropped after the join. At the end, the joined dataset has 191 rows after dropping 36 IDs from 'country' and 24 IDs from 'internetusers'.
+
+####  Wrangling
+
+```{R}
+data %>% filter(Region=="EASTERN EUROPE") %>% select(Country, "GDP"=`GDP ($ per capita)`) %>% arrange(desc(GDP))
+data %>% group_by(Region) %>% summarize(avg_gdp=mean(`GDP ($ per capita)`)) %>% arrange(desc(avg_gdp))
+data %>% mutate(birth_to_death_ratio=Birthrate/Deathrate)
+data %>% mutate(Region = str_replace_all(Region,"ASIA.+","ASIA"))
+```
+
+After exploring my dataset, I found that Slovenia is the country with the highest GDP in West Europe, and Northern America, as a region, has the highest average GDP. I also computed birth-to-death ratio to further explore each country's population.
+
+```{R}
+data %>% summarize_if(is.numeric,list(mean=mean,sd=sd,var=var),na.rm=T)
+data %>% group_by(Region) %>% summarize_if(is.numeric,list(min=min,max=max),na.rm=T) %>% pivot_longer(-1) %>% separate(name, into=c("name","stat"),sep = "_") %>% pivot_wider() -> stat
+library(gt)
+stat %>% gt
+data %>% summarize_all(function(x)sum(is.na(x)))
+data %>% group_by(Region) %>% summarize(n())
+```
+
+After computing summary statistics, I found it interesting that the smallest country in Western Europe is only 2 square mile, and the maximum GDPs of countries in Northern Africa and Commonwealth of Independent States are lower than total average GDP.
+
+
+#### Visualizing
+
+```{R}
+data %>% ggplot(aes(`Literacy (%)`,`GDP ($ per capita)`,color=Region)) + geom_point() + geom_smooth(method = "lm") + facet_wrap(~Region) + ggtitle("GDP vs. Literacy by Region") + theme_light() + scale_y_continuous(breaks = seq(-20000,80000,20000))
+```
+
+This plot shows the relationship between literacy and GDP for each region. As shown in the graph, there is positive correlation between literacy and GDP in Asia, Eastern Europe, Latin America & Carib, Northern America, Oceania, and Western Europe, because as literacy increases, GDP increases as well. However, for other regions, the relationship is not significant.
+
+```{R}
+data %>% ggplot(aes(Region)) + geom_bar(aes(y=`GDP ($ per capita)`, fill=Region), stat = "summary", fun=mean) + geom_errorbar(aes(y=`GDP ($ per capita)`),stat = "summary",fun.data=mean_se) + theme(axis.text.x = element_text(angle=45, hjust=1),legend.position = "none") + scale_y_continuous(n.breaks = 8) + ggtitle("Average GDP For Different Regions") + ylab("Average GDP ($ per capita)")
+```
+
+This bar graph depicts average GDP at different regions. And from the graph, we can see that Northern America and Western Europe have the highest average GDP, while C.W. of Ind. States and Sub-saharan Africa have the lowest average GDP.
+
+```{R}
+data %>% ggplot(aes(x=`Birthrate`,fill=Region)) + geom_density(alpha=.75) + geom_rug() + theme(legend.position = c(.8,.7)) + ggtitle("Birth Rate Distribution For Different Region") + scale_y_continuous(n.breaks = 7) + scale_x_continuous(n.breaks = 11)
+```
+
+This density graph shows the distribution of birthrate at each region. And from this graph it is concluded that birthrates of countries in Baltics, Eastern Europe, and Western Europe tend to have similar birthrate around 500-1000, while countries in other regions have their birthrates spread more evenly. 
+
+
+
+

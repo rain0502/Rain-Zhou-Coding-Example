@@ -1,0 +1,217 @@
+---
+title: 'Project 2: Data Mining, Classification, Prediction'
+author: "SDS322E"
+date: ''
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F,
+tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
+
+class_diag <- function(score, truth, positive, cutoff=.5){
+
+  pred <- factor(score>cutoff,levels=c("TRUE","FALSE"))
+  truth <- factor(truth==positive, levels=c("TRUE","FALSE"))
+
+  tab<-table(truth, pred)
+  acc=sum(diag(tab))/sum(tab)
+  sens=tab[1,1]/rowSums(tab)[1]
+  spec=tab[2,2]/rowSums(tab)[2]
+  ppv=tab[1,1]/colSums(tab)[1]
+
+#CALCULATE F1
+  f1=2*(sens*ppv)/(sens+ppv)
+  
+#CALCULATE EXACT AUC
+  truth<-as.numeric(truth=="TRUE")
+  ord<-order(score, decreasing=TRUE)
+  score <- score[ord]; truth <- truth[ord]
+  TPR=cumsum(truth)/max(1,sum(truth))
+  FPR=cumsum(!truth)/max(1,sum(!truth))
+  dup<-c(score[-1]>=score[-length(score)], FALSE)
+  TPR<-c(0,TPR[!dup],1); FPR<-c(0,FPR[!dup],1)
+  n <- length(TPR)
+  auc<- sum( ((TPR[-1]+TPR[-n])/2) * (FPR[-1]-FPR[-n]) )
+  round(data.frame(acc,sens,spec,ppv,f1,ba=(sens+spec)/2,auc, row.names = "Metrics"),4)
+}
+```
+
+# Mining, Classification, Prediction
+
+## Xiaoyu Zhou, xz7363
+
+### Introduction 
+
+This dataset contains 12 features that can be used to predict mortality by heart failure, such as age, gender, creatinine phosphokinase level, platelets level, etc. All the numerical variables are measuring the levels of each features, such as serum sodium measures serum sodium levels, etc. For all the binary variables, "1" means positive and "0" means negative, while for sex, "1" means male, "0" means female. They are interesting to me because heart failure has been taking millions of lives each year and this data may help us understand the reasons behind it or even prevent it. This dataset is from website: https://www.kaggle.com/, and it contains 299 observations. In the dataset, 129 observations have anaemia and 170 observations do not; 125 observations have diabetes and 174 observations do not; 105 observations have high blood pressure and 194 observations do not; 95 observations smoke and 204 observations do not; 96 observations have death event and 203 observations do not; and lastly, 196 observations are male and 103 observations are female.
+
+```{R}
+library(tidyverse)
+data <- read_csv("heart_failure_clinical_records_dataset.csv")
+data
+heart <- data %>% mutate(anaemia1=ifelse(anaemia==1,"yes","no"), diabetes1=ifelse(diabetes==1,"yes","no"), high_blood_pressure1=ifelse(high_blood_pressure==1,"yes","no"), smoking1=ifelse(smoking==1,"yes","no"), death_event=ifelse(DEATH_EVENT==1,"yes","no"), gender=ifelse(sex==1,"male","female")) %>% select(-anaemia,-diabetes,-high_blood_pressure,-smoking,-DEATH_EVENT,-sex)
+heart
+```
+
+
+### Cluster Analysis
+
+```{R}
+library(cluster)
+pam_dat <- data %>% select(creatinine_phosphokinase, platelets, serum_sodium) %>% scale
+sil_width <- vector()
+for(i in 2:10){
+pam_fit <- pam(pam_dat, k = i)
+sil_width[i] <- pam_fit$silinfo$avg.width
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+sil_width
+pam2 <- data %>% select(creatinine_phosphokinase, platelets, serum_sodium) %>% scale %>% pam(3)
+library(GGally)
+data %>% select(creatinine_phosphokinase, platelets, serum_sodium) %>% mutate(cluster=as.factor(pam2$clustering)) %>% ggpairs(cols= 1:3, aes(color=cluster))
+```
+
+The average Silhouette Width is 0.28 when k=3, which means that the structure is weak and could be artificial. The clusters have the most difference on creatinine phosphokinase and the least difference on platelets. 
+    
+    
+### Dimensionality Reduction with PCA
+
+```{R}
+heart1 <- heart %>% select_if(is.numeric) %>% scale
+princomp(heart1, cor=T) -> pca1
+summary(pca1, loadings=T)
+eigval <- pca1$sdev^2 
+varprop = round(eigval/sum(eigval), 2)
+ggplot() + geom_bar(aes(y=varprop, x=1:7), stat="identity") + xlab("") + geom_path(aes(y=varprop, x=1:7)) + geom_text(aes(x=1:7, y=varprop, label=round(varprop, 2)), vjust=1, col="white", size=5) + scale_y_continuous(breaks=seq(0, .6, .2), labels = scales::percent) + scale_x_continuous(breaks=1:10)
+scores <- pca1$scores
+scores %>% as.data.frame %>% mutate(PC1=pca1$scores[, 1],PC2=pca1$scores[, 2]) %>% ggplot(aes(PC1,PC2)) + geom_point(aes(color=data$age)) + coord_fixed()
+```
+
+PC1 is age/serum creatinine vs. other numerical variables, higher PC1 score means higher age/creatinine and lower other numerical variables; PC2 is CP/time vs. age/ejection fraction/platelets/serum sodium, lower PC2 score means higher CP/time and lower age/ejection fraction/platelets/serum sodium; PC3 is ejection fraction/time vs. CP/platelets/serum creatinine/serum sodium, higher PC3 score means higher ejection fraction/time and lower CP/platelets/serum creatinine/serum sodium. PC4 is age/CP/serum sodium vs. platelets/serum creatinine/time, higher PC4 score means higher age/CP/serum sodium and lower platelets/serum creatinine/time. PC5 is age/platelets/serum sodium vs. CP/ejection fraction/serum creatinine/time, higher PC5 score means higher age/platelets/serum sodium and lower CP/ejection fraction/serum creatinine/time. At the end, 79% of total variance in the dataset is explained by these PCs.
+
+
+###  Linear Classifier
+
+```{R}
+heart
+logistic_fit <- glm(death_event=="yes" ~ age + creatinine_phosphokinase + ejection_fraction + platelets + serum_creatinine + serum_sodium + time, data=heart, family="binomial")
+prob_reg <- predict(logistic_fit, type="response")
+table(truth= factor(heart$death_event=="yes", levels=c("TRUE","FALSE")), prediction= factor(prob_reg>.5, levels=c("TRUE","FALSE")))
+class_diag(prob_reg,truth=heart$death_event,positive="yes")
+```
+
+```{R}
+set.seed(322)
+k=10
+sample <- sample_frac(heart)
+folds <- rep(1:k, length.out=nrow(sample))
+diags<-NULL
+i=1
+for(i in 1:k){
+train<-sample[folds!=i,] 
+test<-sample[folds==i,] 
+truth<-test$death_event
+fit <- glm(death_event=="yes" ~ age + creatinine_phosphokinase + ejection_fraction + platelets + serum_creatinine + serum_sodium + time, data=train, family = "binomial") 
+probs <- predict(fit,newdata = test,type="response")
+diags<-rbind(diags,class_diag(probs,truth, positive="yes")) }
+summarize_all(diags,mean)
+```
+
+The logistic regression model is performing good with an AUC of 0.8959. When predicting new observations in cross-validation, this model is also performing good with an AUC of 0.8822. Therefore, there is no significant sign of decrease in AUC which means no sign of overfitting.
+
+### Non-Parametric Classifier
+
+```{R}
+library(caret)
+knn_fit <- knn3(death_event=="yes" ~ age + creatinine_phosphokinase + ejection_fraction + platelets + serum_creatinine + serum_sodium + time, data=heart)
+prob_knn <- predict(knn_fit,heart)
+table(truth= factor(heart$death_event=="yes", levels=c("TRUE","FALSE")), prediction= factor(prob_knn[,1]>.5, levels=c("TRUE","FALSE")))
+class_diag(prob_knn[,2],truth=heart$death_event,positive="yes")
+```
+
+```{R}
+set.seed(322)
+k=10
+sample <-sample_frac(heart)
+folds <- rep(1:k, length.out=nrow(sample))
+diags<-NULL
+i=1
+for(i in 1:k){
+train<-sample[folds!=i,] 
+test<-sample[folds==i,] 
+truth<-test$death_event
+fit <- knn3(death_event=="yes" ~ age + creatinine_phosphokinase + ejection_fraction + platelets + serum_creatinine + serum_sodium + time, data=heart)
+probs <- predict(fit,newdata = test)[,2]
+diags<-rbind(diags,class_diag(probs,truth, positive="yes")) }
+summarize_all(diags,mean)
+```
+
+The KNN model is performing fair with an AUC of 0.7612. When predicting new observations in cross-validation, this model is also performing fair with an AUC of 0.7628. Therefore, there is no sign of decrease in AUC which means no sign of overfitting. Compared to the logistic regression model, the KNN model performs less well on predicting observations.
+
+
+### Regression/Numeric Prediction
+
+```{R}
+heart
+fit<-lm(age~.,data=heart) #predict mpg from all other variables
+yhat<-predict(fit) #predicted mpg
+mean((heart$age-yhat)^2)
+```
+
+```{R}
+set.seed(1234)
+k=5
+samp <- heart[sample(nrow(heart)),] #randomly order rows
+folds <- cut(seq(1:nrow(heart)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+train <- heart[folds!=i,]
+test <- heart[folds==i,]
+## Fit linear regression model to training set
+fit <- lm(age~.,data=train)
+## Get predictions/y-hats on test set (fold i)
+yhat <- predict(fit,newdata=test)
+## Compute prediction error (MSE) for fold i
+diags<-mean((test$age-yhat)^2)
+}
+mean(diags) 
+```
+
+The linear regression model has a MSE of 123.38 which means a poor prediction. In cross-validation, it has a MSE of 122.62 which means no sign of overfitting.
+
+### Python 
+
+```{R}
+library(reticulate)
+use_python("/usr/bin/python3", required = F)
+age <- heart$age
+```
+
+```{python}
+x = max(r.age)
+y = min(r.age)
+print(x)
+print(y)
+```
+
+```{R}
+range <- py$x - py$y
+range
+```
+
+Maximum and minimum of age are calculated in Python chunk by extracting age from R. And range is calculated in the following R chunk by extracting maximum and minimum from Python.
+
+### Concluding Remarks
+
+Include concluding remarks here, if any
+
+
+
+
