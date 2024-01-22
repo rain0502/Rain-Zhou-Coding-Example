@@ -1,4 +1,4 @@
--- Sample 1
+-- SAMPLE 1
 CREATE TABLE scooter(
     scooter_id INT NOT NULL,
     status ENUM('online', 'offline', 'lost/stolen') NOT NULL DEFAULT 'offline',
@@ -75,7 +75,7 @@ WHERE
     AND ((report_month BETWEEN '2016-01-01' AND '2019-12-01') OR report_month >= '2022-01-01')
 GROUP BY year;
 
--- Sample 2
+-- SAMPLE 2
 select *
 from sf_trip_start
 limit 10;
@@ -230,7 +230,7 @@ SELECT tail, dest, departure
 FROM FlightCTE
 WHERE flight_rank = 4;
 
--- Sample 3
+-- SAMPLE 3
 -- 1
 use mgmtmsa402;
 select *
